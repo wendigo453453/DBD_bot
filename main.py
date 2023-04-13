@@ -1,24 +1,42 @@
 from aiogram.dispatcher.filters import Text
+from aiogram.dispatcher.filters.state import StatesGroup, State
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.types import InlineQueryResultArticle, InputTextMessageContent, InlineQueryResultPhoto
 import hashlib
 import json
 import random
 import sqlite_db
 
+import sqlite3 as sq
+from aiogram.dispatcher import FSMContext
+from aiogram.types import ContentTypes
+from aiogram.utils import markdown as md
+
+
 from keyboards.keyboard import *
 from keyboards.keyboard_perk_builds import *
 from keyboards.keyboard_sos import *
 from keyboards.keyboard_art import *
 from keyboards.keyboard_news import *
+from keyboards.keyboard_guides import *
 
 from db import Database
+from query_hendlers.perk_builds import perk_builds
+from query_hendlers.news import news
+from query_hendlers.leaks import leaks
+from query_hendlers.killer_tier_list import killer_tier_list
+from query_hendlers.art import art
+from message_handlers.map_clock_callouts import *
+from config import *
 
-TOKEN_API = "6019776081:AAHyWrJ0LZGakPXKN05Vw_-N2g1iuxNcTUk"
 
+TOKEN_API = TOKEN_API1
 
+storage = MemoryStorage()
 bot = Bot(TOKEN_API)
-dp = Dispatcher(bot)
-
+dp = Dispatcher(bot=bot,
+                storage=storage)
+pick_f = False
 
 with open('news/news_dict.json', 'r') as file:
     data = json.load(file)
@@ -27,7 +45,11 @@ with open('news/leaks_dict.json', 'r') as file:
 with open('art.json') as f:
     dataa = json.load(f)
 
+db = sq.connect('survivors_builds.db')
+cur = db.cursor()
+
 dbu = Database('survivors_builds.db')
+
 
 
 async def on_startup(_):
@@ -45,6 +67,104 @@ async def help_command(message: types.Message):
     await message.answer(text="Greetings in the bot!",
                          reply_markup=kb_help)
     await message.delete()
+
+
+
+
+@dp.message_handler(Text(equals="💰SUPORT AUTOR💰"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://claypotchurchint.com/wp-content/uploads/2017/10/Donation-plugins-for-WordPress1.jpg",
+                         caption="Any support would be greatly appreciated\n💳monobank💳 4441114440831905\n💵tether trc20💵 TH1KyZydKAEhmjnTiNhZtV9rP6v5gwYZUk""",
+                         reply_markup=main_menu_kb)
+
+
+
+@dp.message_handler(Text(equals="👥SEARCH TEAM👥"))
+async def search(message: types.Message):
+    await message.answer(text="Here you can find a team to play together, to do this you can create your own profile or view profiles of other players",
+                         reply_markup=kb_SEARCH_TEAM)
+
+
+class ClientStatesGroup(StatesGroup):
+    photo = State()
+    desc = State()
+
+def get_cancel() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton('/cancel'))
+
+@dp.message_handler(Text(equals='questionnaire creation', ignore_case=True), state=None)
+async def start_work(message: types.Message) -> None:
+    await ClientStatesGroup.photo.set()
+    await message.answer('First send us a picture that will be displayed to other players when viewing the questionnaire, for example, a screenshot of steem profile',
+                         reply_markup=get_cancel())
+
+
+@dp.message_handler(commands=['cancel'], state='*')
+async def cmd_start(message: types.Message, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if current_state is None:
+        return
+
+    await message.reply('cancelled',
+                        reply_markup=main_menu_kb)
+    await state.finish()
+
+@dp.message_handler(lambda message: not message.photo, state=ClientStatesGroup.photo)
+async def check_photo(message: types.Message):
+    return await message.reply('This is not a picture!')
+
+
+@dp.message_handler(lambda message: message.photo, content_types=['photo'], state=ClientStatesGroup.photo)
+async def load_photo(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['photo'] = message.photo[0].file_id
+
+    await ClientStatesGroup.next()
+    await message.reply('Now send us a description of your profile, tell us about yourself, how many hours you have, and be sure to enter your contact information how to get in touch with you!')
+
+
+conn = sq.connect('survivors_builds.db')
+cursor = conn.cursor()
+
+@dp.message_handler(state=ClientStatesGroup.desc)
+async def load_photo(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['desc'] = message.text
+        cursor.execute('INSERT INTO ankets (image_url, text) VALUES (?, ?)',
+                       (data['photo'], data['desc']))
+        conn.commit()
+    async with state.proxy() as data:
+        await message.reply('This is what your questionnaire looks like⬇️')
+        await bot.send_photo(chat_id=message.from_user.id,
+                             photo=data['photo'],
+                             caption=data['desc'])
+    await message.reply('Your profile has been created!',
+                         reply_markup=main_menu_kb)
+    await state.finish()
+
+
+
+def get_random_record():
+    cursor.execute('SELECT * FROM ankets ORDER BY RANDOM() LIMIT 1')
+    record = cursor.fetchone()
+    return record
+
+@dp.message_handler(Text(equals="questionnaire review"))
+async def show_random_record(message: types.Message):
+    record = get_random_record()
+
+    if record is not None:
+        image_url = record[1]
+        text = record[2]
+        await bot.send_photo(chat_id=message.chat.id, photo=image_url, caption=text,
+                         reply_markup=kb_SEARCH_TEAM)
+    else:
+        await message.reply('No data available',
+                         reply_markup=kb_SEARCH_TEAM)
+
+
+
 
 
 @dp.message_handler(commands=['sendall'])
@@ -81,13 +201,66 @@ async def backfromshrine_command(message: types.Message):
                          reply_markup=main_menu_kb)
 
 
+####################################___GUIDES___####################################
+
+@dp.message_handler(Text(equals="📖GUIDES📖"))
+async def send_image(message: types.Message):
+    await message.answer(text="choose what you want too see",
+                         reply_markup=kb_guide)
+
+@dp.message_handler(Text(equals="Tier List"))
+async def send_image(message: types.Message):
+    await message.answer(text="choose what tier list do you want too wach",
+                         reply_markup=kb_tier_list)
+
+
+@dp.message_handler(Text(equals="Wich survivors shood i unlock first?"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://i.ibb.co/47n7bQV/Screenshot-5.jpg",
+                         caption="Here you can see which survivors i  recomend too buy for a new player. \nYou can also see survivor with the most fun perk too use⬇️",
+                         reply_markup=ikb_fun_perk)
+
+
+@dp.message_handler(Text(equals="🔪Killer Tier List🔪"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://i.ibb.co/1bvN0Zn/Screenshot-9.jpg",
+                         caption="You can see more information about individual killers using the button below⬇️",
+                         reply_markup=ikb_k_t_l)
+
+
+@dp.message_handler(Text(equals="💠Killer Perk Tier List💠"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://i.ibb.co/GPPVR0K/Screenshot-9.jpg",
+                         reply_markup=kb_tier_list)
+
+@dp.message_handler(Text(equals="💠Survivor Perk Tier List💠"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://i.ibb.co/n0kqgTz/Screenshot-9.jpg",
+                         reply_markup=kb_tier_list)
+
+
+@dp.message_handler(Text(equals="🗺Map Tier List🗺"))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://i.ibb.co/Z26DNHw/Screenshot-9.jpg",
+                         reply_markup=kb_tier_list)
+
+
+@dp.message_handler(Text(equals='How too loop deafult constructions'))
+async def send_image(message: types.Message):
+    await bot.send_photo(chat_id=message.chat.id,
+                         photo="https://external-preview.redd.it/N6ql-UJMNjLk_iIHfcDhh3A6M_HO_R0HzDBTklJak6A.png?auto=webp&v=enabled&s=8f65501dd5a906bf3719c6c149df92e91dd89607",
+                         reply_markup=kb_guide)
+
+
 #################################### SHRINE OF SECRETS ####################################
 
 @dp.message_handler(Text(equals="🛒SHRINE OF SECRETS🛒"))
 async def send_image(message: types.Message):
-    if message.chat.type == 'private':
-        if not dbu.user_exists(message.from_user.id):
-            dbu.add_user(message.from_user.id)
     sos1 = await sqlite_db.sos_1()
     for survivors_builds in sos1:
         await message.answer(text=survivors_builds[1])
@@ -160,9 +333,6 @@ async def send_image(message: types.Message):
 
 @dp.message_handler(Text(equals="🌄ART🌄"))
 async def send_art(message: types.Message):
-    if message.chat.type == 'private':
-        if not dbu.user_exists(message.from_user.id):
-            dbu.add_user(message.from_user.id)
     await message.answer(text="Do you want too see random art?",
                          reply_markup=kb_random_art)
 
@@ -183,9 +353,6 @@ async def help_command(message: types.Message):
 
 @dp.message_handler(Text(equals="💠PERK BUILDS💠"))
 async def perk_bilds_command(message: types.Message):
-    if message.chat.type == 'private':
-        if not dbu.user_exists(message.from_user.id):
-            dbu.add_user(message.from_user.id)
     await message.answer(text="Which side do you want to see builds for?",
                          reply_markup=pick_side_kb)
 
@@ -276,9 +443,6 @@ async def send_image(message: types.Message):
 
 @dp.message_handler(Text(equals="📬NEWS📬"))
 async def perk_bilds_command(message: types.Message):
-    if message.chat.type == 'private':
-        if not dbu.user_exists(message.from_user.id):
-            dbu.add_user(message.from_user.id)
     await message.answer(text="Pick what type of news you want to read",
                          reply_markup=news_main)
 
@@ -332,390 +496,149 @@ async def inline_echo(inline_query: types.InlineQuery) -> None:
                                         results=[item],
                                         cache_time=1
                                     )
-
-
-pick_f = True
-###################################__CB__PERK_BUILD#####################################
-
-@dp.callback_query_handler()
-async def some_callback_handler(callback: types.CallbackQuery):
-    if callback.data == 'description_sb1':
-        sb1 = await sqlite_db.surv_b1()
-        for survivors_builds in sb1:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-    if callback.data == 'next->2':
-        sb2 = await sqlite_db.surv_b2()
-        for survivors_builds in sb2:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_sb2)
-    if callback.data == 'description_sb2':
-        sb2 = await sqlite_db.surv_b2()
-        for survivors_builds in sb2:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-    if callback.data == '1<-previous':
-        sb1 = await sqlite_db.surv_b1()
-        for survivors_builds in sb1:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_sb1)
-    if callback.data == 'next->3':
-        sb3 = await sqlite_db.surv_b3()
-        for survivors_builds in sb3:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_sb3)
-    if callback.data == 'description_sb3':
-        sb3 = await sqlite_db.surv_b3()
-        for survivors_builds in sb3:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-    if callback.data == '2<-previous':
-        sb2 = await sqlite_db.surv_b2()
-        for survivors_builds in sb2:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_sb2)
-
-    if callback.data == 'description_kb1':
-        kb1 = await sqlite_db.killer_b1()
-        for survivors_builds in kb1:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-
-    if callback.data == 'next_kb->2':
-        kb2 = await sqlite_db.killer_b2()
-        for survivors_builds in kb2:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_kb2)
-    if callback.data == 'description_kb2':
-        kb2 = await sqlite_db.killer_b2()
-        for survivors_builds in kb2:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-    if callback.data == '1<-previous_kb':
-        kb1 = await sqlite_db.killer_b1()
-        for survivors_builds in kb1:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_kb1)
-    if callback.data == 'next_kb->3':
-        kb3 = await sqlite_db.killer_b3()
-        for survivors_builds in kb3:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_kb3)
-    if callback.data == 'description_kb3':
-        kb3 = await sqlite_db.killer_b3()
-        for survivors_builds in kb3:
-            await callback.message.answer(text=survivors_builds[3])
-            await callback.answer()
-    if callback.data == '2<-previous_kb':
-        kb2 = await sqlite_db.killer_b2()
-        for survivors_builds in kb2:
-            await callback.message.edit_media(types.InputMedia(media=survivors_builds[1],
-                                                               type='photo',
-                                                               caption=survivors_builds[2]),
-                                              reply_markup=ikb_kb2)
-
-    ###################################__CB__NEWS__################################################
-
-    if callback.data == 'read more_n1':
-        await callback.message.answer(text=(data['0']['news_text']))
-        await callback.answer()
-    if callback.data == 'next_n1->':
-        await callback.message.edit_media(types.InputMedia(media=(data['1']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['1']['news_date_time'])}📆\n📃{(data['1']['news_title'])}📃\n\n📑{(data['1']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news2)
-        await callback.answer()
-
-    if callback.data == '<-previous_n2':
-        await callback.message.edit_media(types.InputMedia(media=(data['0']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['0']['news_date_time'])}📆\n📃{(data['0']['news_title'])}📃\n\n📑{(data['0']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news1)
-    if callback.data == 'next_n2->':
-        await callback.message.edit_media(types.InputMedia(media=(data['2']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['2']['news_date_time'])}📆\n📃{(data['2']['news_title'])}📃\n\n📑{(data['2']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news3)
-    if callback.data == 'read more_n2':
-        await callback.message.answer(text=(data['1']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n3':
-        await callback.message.edit_media(types.InputMedia(media=(data['1']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['1']['news_date_time'])}📆\n📃{(data['1']['news_title'])}📃\n\n📑{(data['1']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news2)
-    if callback.data == 'next_n3->':
-        await callback.message.edit_media(types.InputMedia(media=(data['3']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['3']['news_date_time'])}📆\n📃{(data['3']['news_title'])}📃\n\n📑{(data['3']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news4)
-    if callback.data == 'read more_n3':
-        await callback.message.answer(text=(data['2']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n4':
-        await callback.message.edit_media(types.InputMedia(media=(data['2']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['2']['news_date_time'])}📆\n📃{(data['2']['news_title'])}📃\n\n📑{(data['2']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news3)
-    if callback.data == 'next_n4->':
-        await callback.message.edit_media(types.InputMedia(media=(data['4']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['4']['news_date_time'])}📆\n📃{(data['4']['news_title'])}📃\n\n📑{(data['4']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news5)
-    if callback.data == 'read more_n4':
-        await callback.message.answer(text=(data['3']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n5':
-        await callback.message.edit_media(types.InputMedia(media=(data['3']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['3']['news_date_time'])}📆\n📃{(data['3']['news_title'])}📃\n\n📑{(data['3']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news4)
-    if callback.data == 'next_n5->':
-        await callback.message.edit_media(types.InputMedia(media=(data['5']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['5']['news_date_time'])}📆\n📃{(data['5']['news_title'])}📃\n\n📑{(data['5']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news6)
-    if callback.data == 'read more_n5':
-        await callback.message.answer(text=(data['4']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n6':
-        await callback.message.edit_media(types.InputMedia(media=(data['4']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['4']['news_date_time'])}📆\n📃{(data['4']['news_title'])}📃\n\n📑{(data['4']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news5)
-    if callback.data == 'next_n6->':
-        await callback.message.edit_media(types.InputMedia(media=(data['6']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['6']['news_date_time'])}📆\n📃{(data['6']['news_title'])}📃\n\n📑{(data['6']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news7)
-    if callback.data == 'read more_n6':
-        await callback.message.answer(text=(data['5']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n7':
-        await callback.message.edit_media(types.InputMedia(media=(data['5']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['5']['news_date_time'])}📆\n📃{(data['5']['news_title'])}📃\n\n📑{(data['5']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news6)
-    if callback.data == 'next_n7->':
-        await callback.message.edit_media(types.InputMedia(media=(data['7']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['7']['news_date_time'])}📆\n📃{(data['7']['news_title'])}📃\n\n📑{(data['7']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news8)
-    if callback.data == 'read more_n7':
-        await callback.message.answer(text=(data['6']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n8':
-        await callback.message.edit_media(types.InputMedia(media=(data['6']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['6']['news_date_time'])}📆\n📃{(data['6']['news_title'])}📃\n\n📑{(data['6']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news7)
-    if callback.data == 'next_n8->':
-        await callback.message.edit_media(types.InputMedia(media=(data['8']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['8']['news_date_time'])}📆\n📃{(data['8']['news_title'])}📃\n\n📑{(data['8']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news9)
-    if callback.data == 'read more_n8':
-        await callback.message.answer(text=(data['7']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n9':
-        await callback.message.edit_media(types.InputMedia(media=(data['7']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['7']['news_date_time'])}📆\n📃{(data['7']['news_title'])}📃\n\n📑{(data['7']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news8)
-    if callback.data == 'next_n9->':
-        await callback.message.edit_media(types.InputMedia(media=(data['9']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['9']['news_date_time'])}📆\n📃{(data['9']['news_title'])}📃\n\n📑{(data['9']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news10)
-    if callback.data == 'read more_n9':
-        await callback.message.answer(text=(data['8']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n10':
-        await callback.message.edit_media(types.InputMedia(media=(data['8']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(data['8']['news_date_time'])}📆\n📃{(data['8']['news_title'])}📃\n\n📑{(data['8']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news9)
-    if callback.data == 'read more_n10':
-        await callback.message.answer(text=(data['9']['news_text']))
-        await callback.answer()
-
-    ###################################__CB__LEAKS__################################################
-
-    if callback.data == 'read more_n1_l':
-        await callback.message.answer(text=(datal['10']['news_text']))
-        await callback.answer()
-    if callback.data == 'next_n1->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['11']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['11']['news_date_time'])}📆\n📃{(datal['11']['news_title'])}📃\n\n📑{(datal['11']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news2_l)
-        await callback.answer()
-
-    if callback.data == '<-previous_n2_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['10']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['10']['news_date_time'])}📆\n📃{(datal['10']['news_title'])}📃\n\n📑{(datal['10']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news1_l)
-    if callback.data == 'next_n2->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['12']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['12']['news_date_time'])}📆\n📃{(datal['12']['news_title'])}📃\n\n📑{(datal['12']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news3_l)
-    if callback.data == 'read more_n2_l':
-        await callback.message.answer(text=(datal['11']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n3_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['11']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['11']['news_date_time'])}📆\n📃{(datal['11']['news_title'])}📃\n\n📑{(datal['11']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news2_l)
-    if callback.data == 'next_n3->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['13']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['13']['news_date_time'])}📆\n📃{(datal['13']['news_title'])}📃\n\n📑{(datal['13']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news4_l)
-    if callback.data == 'read more_n3_l':
-        await callback.message.answer(text=(datal['12']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n4_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['12']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['12']['news_date_time'])}📆\n📃{(datal['12']['news_title'])}📃\n\n📑{(datal['12']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news3_l)
-    if callback.data == 'next_n4->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['14']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['14']['news_date_time'])}📆\n📃{(datal['14']['news_title'])}📃\n\n📑{(datal['14']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news5_l)
-    if callback.data == 'read more_n4_l':
-        await callback.message.answer(text=(datal['13']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n5_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['13']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['13']['news_date_time'])}📆\n📃{(datal['13']['news_title'])}📃\n\n📑{(datal['13']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news4_l)
-    if callback.data == 'next_n5->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['15']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['15']['news_date_time'])}📆\n📃{(datal['15']['news_title'])}📃\n\n📑{(datal['15']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news6_l)
-    if callback.data == 'read more_n5_l':
-        await callback.message.answer(text=(datal['14']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n6_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['14']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['14']['news_date_time'])}📆\n📃{(datal['14']['news_title'])}📃\n\n📑{(datal['14']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news5_l)
-    if callback.data == 'next_n6->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['16']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['16']['news_date_time'])}📆\n📃{(datal['16']['news_title'])}📃\n\n📑{(datal['16']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news7_l)
-    if callback.data == 'read more_n6_l':
-        await callback.message.answer(text=(datal['15']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n7_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['15']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['15']['news_date_time'])}📆\n📃{(datal['15']['news_title'])}📃\n\n📑{(datal['15']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news6_l)
-    if callback.data == 'next_n7->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['17']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['17']['news_date_time'])}📆\n📃{(datal['17']['news_title'])}📃\n\n📑{(datal['17']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news8_l)
-    if callback.data == 'read more_n7_l':
-        await callback.message.answer(text=(datal['16']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n8_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['16']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['16']['news_date_time'])}📆\n📃{(datal['16']['news_title'])}📃\n\n📑{(datal['16']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news7_l)
-    if callback.data == 'next_n8->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['18']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['18']['news_date_time'])}📆\n📃{(datal['18']['news_title'])}📃\n\n📑{(datal['18']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news9_l)
-    if callback.data == 'read more_n8_l':
-        await callback.message.answer(text=(datal['17']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n9_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['17']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['17']['news_date_time'])}📆\n📃{(datal['17']['news_title'])}📃\n\n📑{(datal['17']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news8_l)
-    if callback.data == 'next_n9->_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['19']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['19']['news_date_time'])}📆\n📃{(datal['19']['news_title'])}📃\n\n📑{(datal['19']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news10_l)
-    if callback.data == 'read more_n9_l':
-        await callback.message.answer(text=(datal['18']['news_text']))
-        await callback.answer()
-
-    if callback.data == '<-previous_n10_l':
-        await callback.message.edit_media(types.InputMedia(media=(datal['18']['news_pictures']),
-                                                           type='photo',
-                                                           caption=f"📆Date{(datal['18']['news_date_time'])}📆\n📃{(datal['18']['news_title'])}📃\n\n📑{(datal['18']['news_description'])}📑"),
-                                          reply_markup=ikb_dbd_news9_l)
-    if callback.data == 'read more_n10_l':
-        await callback.message.answer(text=(datal['19']['news_text']))
-        await callback.answer()
-
-####################################___CB__ART___############################################################
-
-    global pick_f
-    if callback.data == 'yes':
-        if not pick_f:
-            await callback.answer(text='good')
-            pick_f = not pick_f
-        else:
-            await callback.answer(text='you have already appreciated')
-    if callback.data == 'no':
-        if not pick_f:
-            await callback.answer(text='Too bad(')
-            pick_f = not pick_f
-        else:
-            await callback.answer(text='you have already appreciated')
-    if callback.data == 'next_art':
-        random_link = random.choice(dataa['links'])
-        await callback.message.edit_media(types.InputMedia(media=(random_link['address']),
-                                                               type='photo',
-                                                               caption="how do you like this art?"),
-                                              reply_markup=ikb_random_art)
-
+######################___MAP__CLOCK_CALLOUTS___################################
+dp.register_message_handler(Map_clock_callouts, Text(equals="🗺Map clock callouts🗺"))
+dp.register_message_handler(MacMillan, Text(equals="The MacMillan Estate"))
+dp.register_message_handler(Coldwind, Text(equals="Coldwind Farm"))
+dp.register_message_handler(Autohaven, Text(equals="Autohaven Wreckers"))
+dp.register_message_handler(Crotus, Text(equals="Crotus Prenn Asylum"))
+dp.register_message_handler(Swamp, Text(equals="Backwater Swamp"))
+dp.register_message_handler(Institute, Text(equals="Lerys Memorial Institute"))
+dp.register_message_handler(Red__Forest, Text(equals="Red Forest"))
+dp.register_message_handler(Following_maps2, Text(equals="Following maps2️⃣➡️"))
+dp.register_message_handler(Badham, Text(equals="Badham"))
+dp.register_message_handler(Gideon, Text(equals="Gideon Meat Plant"))
+dp.register_message_handler(Yamaoka, Text(equals="Yamaoka Estate"))
+dp.register_message_handler(Ormond, Text(equals="Ormond"))
+dp.register_message_handler(back_to_GUIDES, Text(equals="⬅️back to 📖GUIDES📖"))
+dp.register_message_handler(Haddonfield, Text(equals="Haddonfield"))
+dp.register_message_handler(Saloon, Text(equals="Dead Dawg Saloon"))
+dp.register_message_handler(Hill, Text(equals="Silent Hill"))
+dp.register_message_handler(Raccoon, Text(equals="Raccoon City"))
+dp.register_message_handler(Previous_maps, Text(equals="⬅️Previous maps"))
+dp.register_message_handler(Following_maps, Text(equals="Following maps➡️"))
+dp.register_message_handler(Eyrie, Text(equals="Eyrie of Crows"))
+dp.register_message_handler(Garden, Text(equals="Garden of Joy"))
+dp.register_message_handler(Shattered, Text(equals="The Shattered Square"))
+dp.register_message_handler(Following_maps3, Text(equals="Following maps3️⃣➡️"))
+dp.register_message_handler(Previous_maps1, Text(equals="⬅️1️⃣Previous maps"))
+dp.register_message_handler(Previous_maps2, Text(equals="⬅️2️⃣Previous maps"))
+######################___PERK__BUILDS___################################
+dp.register_callback_query_handler(perk_builds, text='description_sb1')
+dp.register_callback_query_handler(perk_builds, text='next->2')
+dp.register_callback_query_handler(perk_builds, text='description_sb2')
+dp.register_callback_query_handler(perk_builds, text='1<-previous')
+dp.register_callback_query_handler(perk_builds, text='next->3')
+dp.register_callback_query_handler(perk_builds, text='description_sb3')
+dp.register_callback_query_handler(perk_builds, text='2<-previous')
+dp.register_callback_query_handler(perk_builds, text='description_kb1')
+dp.register_callback_query_handler(perk_builds, text='next_kb->2')
+dp.register_callback_query_handler(perk_builds, text='description_kb2')
+dp.register_callback_query_handler(perk_builds, text='1<-previous_kb')
+dp.register_callback_query_handler(perk_builds, text='next_kb->3')
+dp.register_callback_query_handler(perk_builds, text='description_kb3')
+dp.register_callback_query_handler(perk_builds, text='2<-previous_kb')
+###############################___NEWS___################################
+dp.register_callback_query_handler(news, text='read more_n1')
+dp.register_callback_query_handler(news, text='next_n1->')
+dp.register_callback_query_handler(news, text='<-previous_n2')
+dp.register_callback_query_handler(news, text='next_n2->')
+dp.register_callback_query_handler(news, text='read more_n2')
+dp.register_callback_query_handler(news, text='<-previous_n3')
+dp.register_callback_query_handler(news, text='next_n3->')
+dp.register_callback_query_handler(news, text='read more_n3')
+dp.register_callback_query_handler(news, text='<-previous_n4')
+dp.register_callback_query_handler(news, text='next_n4->')
+dp.register_callback_query_handler(news, text='read more_n4')
+dp.register_callback_query_handler(news, text='<-previous_n5')
+dp.register_callback_query_handler(news, text='next_n5->')
+dp.register_callback_query_handler(news, text='read more_n5')
+dp.register_callback_query_handler(news, text='<-previous_n6')
+dp.register_callback_query_handler(news, text='next_n6->')
+dp.register_callback_query_handler(news, text='read more_n6')
+dp.register_callback_query_handler(news, text='<-previous_n7')
+dp.register_callback_query_handler(news, text='next_n7->')
+dp.register_callback_query_handler(news, text='read more_n7')
+dp.register_callback_query_handler(news, text='<-previous_n8')
+dp.register_callback_query_handler(news, text='next_n8->')
+dp.register_callback_query_handler(news, text='read more_n8')
+dp.register_callback_query_handler(news, text='<-previous_n9')
+dp.register_callback_query_handler(news, text='next_n9->')
+dp.register_callback_query_handler(news, text='read more_n9')
+dp.register_callback_query_handler(news, text='<-previous_n10')
+dp.register_callback_query_handler(news, text='read more_n10')
+###############################___LEAKS___################################
+dp.register_callback_query_handler(leaks, text='read more_n1_l')
+dp.register_callback_query_handler(leaks, text='next_n1->_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n2_l')
+dp.register_callback_query_handler(leaks, text='next_n2->_l')
+dp.register_callback_query_handler(leaks, text='read more_n2_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n3_l')
+dp.register_callback_query_handler(leaks, text='next_n3->_l')
+dp.register_callback_query_handler(leaks, text='read more_n3_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n4_l')
+dp.register_callback_query_handler(leaks, text='next_n4->_l')
+dp.register_callback_query_handler(leaks, text='read more_n4_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n5_l')
+dp.register_callback_query_handler(leaks, text='next_n5->_l')
+dp.register_callback_query_handler(leaks, text='read more_n5_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n6_l')
+dp.register_callback_query_handler(leaks, text='next_n6->_l')
+dp.register_callback_query_handler(leaks, text='read more_n6_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n7_l')
+dp.register_callback_query_handler(leaks, text='next_n7->_l')
+dp.register_callback_query_handler(leaks, text='read more_n7_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n8_l')
+dp.register_callback_query_handler(leaks, text='next_n8->_l')
+dp.register_callback_query_handler(leaks, text='read more_n8_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n9_l')
+dp.register_callback_query_handler(leaks, text='next_n9->_l')
+dp.register_callback_query_handler(leaks, text='read more_n9_l')
+dp.register_callback_query_handler(leaks, text='<-previous_n10_l')
+dp.register_callback_query_handler(leaks, text='read more_n10_l')
+###############################___KILLER TIER LIST___################################
+dp.register_callback_query_handler(killer_tier_list, text='NURSE')
+dp.register_callback_query_handler(killer_tier_list, text='BLIGHT')
+dp.register_callback_query_handler(killer_tier_list, text='SPIRIT')
+dp.register_callback_query_handler(killer_tier_list, text='ARTIST')
+dp.register_callback_query_handler(killer_tier_list, text='PLAGUE')
+dp.register_callback_query_handler(killer_tier_list, text='ONI')
+dp.register_callback_query_handler(killer_tier_list, text='EXECUTIONER')
+dp.register_callback_query_handler(killer_tier_list, text='MASTERMIND')
+dp.register_callback_query_handler(killer_tier_list, text='HUNTERESS')
+dp.register_callback_query_handler(killer_tier_list, text='HAG')
+dp.register_callback_query_handler(killer_tier_list, text='TWINS')
+dp.register_callback_query_handler(killer_tier_list, text='CENOBITE')
+dp.register_callback_query_handler(killer_tier_list, text='CANIBAL')
+dp.register_callback_query_handler(killer_tier_list, text='DEMOGORGON')
+dp.register_callback_query_handler(killer_tier_list, text='DEADSLINGER')
+dp.register_callback_query_handler(killer_tier_list, text='NEMESIS')
+dp.register_callback_query_handler(killer_tier_list, text='DREDGE')
+dp.register_callback_query_handler(killer_tier_list, text='HILLBILLY')
+dp.register_callback_query_handler(killer_tier_list, text='TRICKSTER')
+dp.register_callback_query_handler(killer_tier_list, text='DOCTOR')
+dp.register_callback_query_handler(killer_tier_list, text='LEGION')
+dp.register_callback_query_handler(killer_tier_list, text='GHOSTFACE')
+dp.register_callback_query_handler(killer_tier_list, text='PIG')
+dp.register_callback_query_handler(killer_tier_list, text='WRAITH')
+dp.register_callback_query_handler(killer_tier_list, text='CLOWN')
+dp.register_callback_query_handler(killer_tier_list, text='NIGHTMARE')
+dp.register_callback_query_handler(killer_tier_list, text='SHAPE')
+dp.register_callback_query_handler(killer_tier_list, text='ONRYO')
+dp.register_callback_query_handler(killer_tier_list, text='TRAPPER')
+dp.register_callback_query_handler(killer_tier_list, text='2next')
+dp.register_callback_query_handler(killer_tier_list, text='1BACK')
+dp.register_callback_query_handler(killer_tier_list, text='3next')
+dp.register_callback_query_handler(killer_tier_list, text='2BACK')
+dp.register_callback_query_handler(killer_tier_list, text='4next')
+dp.register_callback_query_handler(killer_tier_list, text='3BACK')
+dp.register_callback_query_handler(killer_tier_list, text='3BACK')
+dp.register_callback_query_handler(killer_tier_list, text='For fun')
+dp.register_callback_query_handler(killer_tier_list, text='For beginners')
+##################################___ART___################################
+dp.register_callback_query_handler(art, text='yes')
+dp.register_callback_query_handler(art, text='no')
+dp.register_callback_query_handler(art, text='next_art')
 
 if __name__ == '__main__':
     executor.start_polling(dispatcher=dp,
